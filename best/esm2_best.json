@@ -1,0 +1,15 @@
+{
+  "batch_size": 256,
+  "classifier_type": "delta",
+  "dropout": 0.5357584107527866,
+  "hidden_dim": 512,
+  "learning_rate": 0.00032048912804434826,
+  "num_epochs": 30,
+  "num_layers": 4,
+  "optimizer": "RMSprop",
+  "patience": 5,
+  "rank": 4,
+  "scheduler": "cosine",
+  "steps": 2,
+  "weight_decay": 4.711335560280482e-05
+}

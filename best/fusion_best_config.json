@@ -1,0 +1,15 @@
+{
+    "classifier_type": "deltaattfusion",
+    "hidden_dim": 128,
+    "num_layers": 4,
+    "dropout": 0.1366446537351037,
+    "batch_size": 64,
+    "learning_rate": 0.0009925368624034026,
+    "weight_decay": 0.00011990263215195225,
+    "optimizer": "RMSprop",
+    "scheduler": "cosine",
+    "num_epochs": 30,
+    "patience": 5,
+    "rank": 8,
+    "steps": 1
+}
