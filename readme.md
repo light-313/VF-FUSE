@@ -13,6 +13,7 @@ The core advantages of VF-FUSE include:
 
 ## Project Structure
 
+```
 VF-FUSE/
 ├── best/                         # Best models and configurations
 │   ├── esm2_best.json            # ESM2 best hyperparameter configuration
@@ -44,6 +45,7 @@ VF-FUSE/
 ├── Core Architecture Definition
 │   ├── model_type.py             # Various model architecture definitions
 │   └── Ensemble_model.py         # Ensemble model implementation
+```
 
 ## Detailed Function of Each File
 
@@ -55,7 +57,6 @@ VF-FUSE/
 - **plm_tune.py**: Implements hyperparameter optimization using Ray Tune to search for the best model configuration.
 - **Ensemble_model.py**: Implements various ensemble strategies to combine predictions from different models to improve overall performance.
 
-## 
 Installation Guide
 
 ### Requirements
@@ -105,8 +106,6 @@ python trad_feature_extraction.py --input train_ba.fasta --output features/trad_
 
 python  predict_new_vf  --output ensemble_test_results.csv
 
-
-
 ## help you choose an ensemble method :
 
 * **For the best overall performance:** Choose  **Gradient Boosting Ensemble** . It achieved the highest scores across most key metrics like F1, MCC, overall Accuracy (ACC), Specificity (SP), AUC, and AUPR. This method provides the strongest balanced and comprehensive results.
@@ -115,13 +114,7 @@ python  predict_new_vf  --output ensemble_test_results.csv
 
 In short, for the strongest all-around results, go with  **Gradient Boosting Ensemble** . If finding every possible positive is critical above all else, **Majority Voting** might be considered for its high SN, but be aware of the trade-offs in other metrics.
 
-## Contribution and Citation
 
-If you use VF-FUSE in your research, please cite our work:
-
-```
-@article{...}
-```
 
 ## Contact Information
 
