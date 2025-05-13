@@ -13,6 +13,8 @@ The core advantages of VF-FUSE include:
 
 ## Project Structure
 
+
+```
 VF-FUSE/
 ├── best/                         # Best models and configurations
 │   ├── esm2_best.json            # ESM2 best hyperparameter configuration
@@ -44,6 +46,7 @@ VF-FUSE/
 ├── Core Architecture Definition
 │   ├── model_type.py             # Various model architecture definitions
 │   └── Ensemble_model.py         # Ensemble model implementation
+```
 
 ## Detailed Function of Each File
 
@@ -55,7 +58,6 @@ VF-FUSE/
 - **plm_tune.py**: Implements hyperparameter optimization using Ray Tune to search for the best model configuration.
 - **Ensemble_model.py**: Implements various ensemble strategies to combine predictions from different models to improve overall performance.
 
-## 
 Installation Guide
 
 ### Requirements
@@ -104,8 +106,6 @@ python trad_feature_extraction.py --input train_ba.fasta --output features/trad_
 ### 3. predict vf
 
 python  predict_new_vf  --output ensemble_test_results.csv
-
-
 
 ## help you choose an ensemble method :
 
