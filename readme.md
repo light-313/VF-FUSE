@@ -13,7 +13,6 @@ The core advantages of VF-FUSE include:
 
 ## Project Structure
 
-
 ```
 VF-FUSE/
 ├── best/                         # Best models and configurations
@@ -115,13 +114,7 @@ python  predict_new_vf  --output ensemble_test_results.csv
 
 In short, for the strongest all-around results, go with  **Gradient Boosting Ensemble** . If finding every possible positive is critical above all else, **Majority Voting** might be considered for its high SN, but be aware of the trade-offs in other metrics.
 
-## Contribution and Citation
 
-If you use VF-FUSE in your research, please cite our work:
-
-```
-@article{...}
-```
 
 ## Contact Information
 
