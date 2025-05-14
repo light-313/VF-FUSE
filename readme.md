@@ -14,6 +14,7 @@ The core advantages of VF-FUSE include:
 ## Project Structure
 
 ```
+
 VF-FUSE/
 ├── best/                         # Best models and configurations
 │   ├── esm2_best.json            # ESM2 best hyperparameter configuration
@@ -32,8 +33,6 @@ VF-FUSE/
 ├── Feature Extraction Module
 │   ├── get_esm2_embedding.py     # Extract protein embeddings using ESM2
 │   ├── get_prot5.py              # Extract protein embeddings using ProtT5
-│   ├── load_esm2.py              # ESM2 model loading utility
-│   ├── load_prot5.py             # ProtT5 model loading utility
 │   └── trad_feature_extraction.py# Traditional feature extraction tool
 │
 ├── Model Training and Evaluation
@@ -45,6 +44,10 @@ VF-FUSE/
 ├── Core Architecture Definition
 │   ├── model_type.py             # Various model architecture definitions
 │   └── Ensemble_model.py         # Ensemble model implementation
+|——vf_streamlit_app.py   # Prediction of virulence factors app
+|
+|
+|——test_data # The ESM2 and PROT5 features of the independent test set can be used to test the model.
 ```
 
 ## Detailed Function of Each File
@@ -98,24 +101,10 @@ python get_esm2_embedding.py --input train_ba.fasta --output features/esm2_train
 # Extract ProtT5 features
 python get_prot5.py --input train_ba.fasta --output features/prot5_train.h5 --batch_size 4
 
-# Extract traditional features
-python trad_feature_extraction.py --input train_ba.fasta --output features/trad_train.csv --features AAC,DPC,PAAC,QSO
 ```
 
-### 3. predict vf
+### 3. Launch the  streamlit  app
 
-python  predict_new_vf  --output ensemble_test_results.csv
-
-## help you choose an ensemble method :
-
-* **For the best overall performance:** Choose  **Gradient Boosting Ensemble** . It achieved the highest scores across most key metrics like F1, MCC, overall Accuracy (ACC), Specificity (SP), AUC, and AUPR. This method provides the strongest balanced and comprehensive results.
-* **If maximizing Sensitivity (finding positives) is your absolute top priority:** **Majority Voting** achieved the highest Sensitivity (SN). However, note that its performance on other metrics is lower than Gradient Boosting.
-* **Other methods (Simple Averaging, Weighted Averaging, Stacking):** These showed moderate or lower performance compared to Gradient Boosting in this evaluation. Simple Averaging and Weighted Averaging are basic methods, while Stacking was not the top performer in this specific comparison.
-
-In short, for the strongest all-around results, go with  **Gradient Boosting Ensemble** . If finding every possible positive is critical above all else, **Majority Voting** might be considered for its high SN, but be aware of the trade-offs in other metrics.
-
-
-
-## Contact Information
-
-For any questions or suggestions regarding the project, please contact: 810169194@qq.com
+```
+streamlit run  VF-FUSE\vf_streamlit_app.py
+```

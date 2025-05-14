@@ -5,26 +5,26 @@
   "dropout": 0.4,
   "rank": 32,
   "steps": 4,
-  "test_esm_path": "/root/autodl-tmp/.autodl/embedding_data/test_esm2_t33_650M_UR50D_mean.h5",
-  "test_prot5_path": "/root/autodl-tmp/test_prot_features_modified.h5",
+  "test_esm_path": "VF-FUSE\test_data\test_esm2_t33_650M_UR50D_mean.h5",
+  "test_prot5_path": "VF-FUSE\test_data\test_prot_features_modified.h5",
   "models": [
     {
       "type": "DualPathwayFusion",
       "feature_type": "all",
-      "path": "/root/VF-pred/best/fusion_fine_tuned.pth",
+      "path": "VF-FUSE/best/fusion_fine_tuned.pth",
       "weight": 0.85
     },
 
     {
       "type": "delta",
       "feature_type": "esm2",
-      "path": "/root/VF-pred/best/esm2_best.pth",
+      "path": "VF-FUSE/best/esm2_best.pth",
       "weight": 0.73
     },
     {
       "type": "delta",
       "feature_type": "prot5",
-      "path": "/root/VF-pred/best/prot5_best_model.pth",
+      "path": "VF-FUSE/best/prot5_best_model.pth",
       "weight": 0.08
     }
   ],

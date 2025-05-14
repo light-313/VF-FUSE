@@ -1,808 +1,646 @@
-import os
+import streamlit as st
+import torch
 import numpy as np
 import pandas as pd
-import torch
-import streamlit as st
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
 import json
 import h5py
 import tempfile
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pathlib import Path
-from torch.utils.data import DataLoader, Dataset
-from Bio import SeqIO
-import plotly.express as px
-import plotly.graph_objects as go
-from io import StringIO
-import warnings
-from typing import List, Dict, Tuple, Any
-import matplotlib.cm as cm
-import altair as alt
+from sklearn.metrics import roc_curve, precision_recall_curve, auc
+from torch.utils.data import DataLoader
+import matplotlib as mpl
+from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 
-# Import needed modules from your existing code
-from model_type import DualPathwayFusion
-
-# Silence warnings
-warnings.filterwarnings("ignore")
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+# Import necessary functions from your existing code
+# Assuming these are in the same directory or properly importable
+from esmmodel import *
+from model_type import *
 
 # Set page configuration
 st.set_page_config(
-    page_title="VF-FUSE: Virulence Factor Prediction",
+    page_title="VF-pred: Virulence Factor Prediction",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS styles
-def add_custom_css():
-    st.markdown("""
-    <style>
-        .main-header {
-            font-size: 2.5rem;
-            background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 1rem;
-        }
-        .sub-header {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            color: #4b6cb7;
-        }
-        .result-card {
-            padding: 1.5rem;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            background-color: white;
-            margin-bottom: 1rem;
-        }
-        .stProgress > div > div > div > div {
-            background-color: #4b6cb7;
-        }
-        .stTextInput > div > div > input {
-            border-radius: 5px;
-        }
-        .stButton > button {
-            border-radius: 5px;
-            background-color: #4b6cb7;
-            color: white;
-            font-weight: bold;
-            padding: 0.5rem 1rem;
-        }
-        .footer {
-            text-align: center;
-            margin-top: 3rem;
-            color: #888;
-            font-size: 0.8rem;
-        }
-    </style>
-    """, unsafe_allow_html=True)
+# Styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.3rem;
+        font-weight: 700;
+        color: #1E3A8A;
+        margin-bottom: 1.5rem;
+    }
+    .sub-header {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #3B82F6;
+        margin-top: 2.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .metric-card {
+        padding: 1.2rem;
+        border-radius: 0.5rem;
+        border: 1px solid #E5E7EB;
+        background-color: #F9FAFB;
+        margin: 0.8rem 0;
+        height: 100%;
+    }
+    .metric-value {
+        font-size: 1.7rem;
+        font-weight: 700;
+        color: #1F2937;
+    }
+    .metric-label {
+        font-size: 0.9rem;
+        color: #6B7280;
+        margin-top: 0.3rem;
+    }
+    .highlight {
+        background-color: #FEF3C7;
+        padding: 1rem;
+        border-radius: 0.3rem;
+        margin: 1.5rem 0;
+    }
+    .caption {
+        font-size: 0.85rem;
+        color: #4B5563;
+        font-style: italic;
+        margin-top: 0.8rem;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2rem;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 3rem;
+        white-space: pre-wrap;
+        font-size: 1rem;
+    }
+    div.block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    section[data-testid="stSidebar"] > div {
+        padding: 1.5rem 1rem;
+    }
+    .section-spacing {
+        margin-top: 2.5rem;
+        margin-bottom: 2.5rem;
+    }
+    /* Add style for file upload areas */
+    .uploadedFile {
+        border: 1px dashed #3B82F6;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        background-color: rgba(59, 130, 246, 0.05);
+    }
+    /* Enhanced button style */
+    .stButton>button {
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Helper functions
-def set_all_seeds(seed=42):
-    """Set all random seeds for reproducibility"""
-    import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    os.environ['PYTHONHASHSEED'] = str(seed)
+def load_h5_data(file):
+    """Load data from uploaded H5 file to a temporary file for processing"""
+    with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+        temp_file.write(file.getvalue())
+        temp_path = temp_file.name
+    return temp_path
 
-@st.cache_resource
 def get_device():
-    """Get the appropriate device for computation"""
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-@st.cache_data
-def load_config(config_path):
-    """Load configuration from JSON file"""
-    with open(config_path, "r") as f:
-        return json.load(f)
-
-@st.cache_resource
-def load_model(model_path, model_type, config, esm_dim, prot5_dim, device, feature_type):
-    """Load model with caching for better performance"""
-    print(f"Loading model: {model_path} (Type: {model_type}, Feature: {feature_type})")
+def create_scientific_figure(data, max_display=5):
+    """Generate publication-quality ROC and PR curves side by side"""
+    # Define method colors and names
+    method_colors = {
+        'simple_avg': '#1f77b4',          # Blue
+        'weighted_avg': '#ff7f0e',        # Orange
+        'majority_vote': '#2ca02c',       # Green
+        'stacking': '#d62728',            # Red
+        'gradient_boosted_ensemble': '#9467bd'  # Purple
+    }
+    
+    method_names = {
+        'simple_avg': 'Simple Average',
+        'weighted_avg': 'Weighted Average',
+        'majority_vote': 'Majority Voting',
+        'stacking': 'Stacking Ensemble',
+        'gradient_boosted_ensemble': 'Gradient Boosted Ensemble'
+    }
+    
+    # Set style for plots
+    plt.style.use('seaborn-v0_8-whitegrid')
+    mpl.rcParams['font.family'] = 'Arial'
+    mpl.rcParams['font.size'] = 10
+    mpl.rcParams['axes.linewidth'] = 1.2
+    
+    # Create figure with two side-by-side subplots
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), dpi=150)
+    
+    # Customize the appearance for scientific publication
+    for ax in axes:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_linewidth(1.2)
+        ax.spines['bottom'].set_linewidth(1.2)
+        ax.tick_params(width=1.2, length=5)
+        ax.grid(True, linestyle='--', alpha=0.3)
+    
+    # Limit to a maximum number of methods to display
+    methods = list(data.keys())[:max_display]
+    
+    # Plot ROC curves on the left subplot
+    for method in methods:
+        fpr = data[method]['roc']['fpr']
+        tpr = data[method]['roc']['tpr']
+        auc_score = data[method]['roc']['auc']
+        
+        method_label = method_names.get(method, method)
+        color = method_colors.get(method, None)
+        
+        axes[0].plot(fpr, tpr, label=f"{method_label} (AUC={auc_score:.2f}%)", 
+                   lw=2, color=color)
+    
+    # Add reference diagonal line to ROC plot
+    axes[0].plot([0, 1], [0, 1], 'k--', alpha=0.7, lw=1)
+    
+    # Set ROC plot properties
+    axes[0].set_xlim([0.0, 1.0])
+    axes[0].set_ylim([0.0, 1.05])
+    axes[0].set_xlabel('False Positive Rate', fontsize=11, fontweight='bold')
+    axes[0].set_ylabel('True Positive Rate', fontsize=11, fontweight='bold')
+    axes[0].set_title('ROC Curve', fontsize=12, fontweight='bold')
+    axes[0].legend(loc='lower right', frameon=True, framealpha=0.9, fontsize=8)
+    
+    # Add minor grid for ROC
+    axes[0].xaxis.set_minor_locator(MultipleLocator(0.05))
+    axes[0].yaxis.set_minor_locator(MultipleLocator(0.05))
+    
+    # Plot PR curves on the right subplot
+    for method in methods:
+        precision = data[method]['pr']['precision']
+        recall = data[method]['pr']['recall']
+        aupr_score = data[method]['pr']['aupr']
+        
+        method_label = method_names.get(method, method)
+        color = method_colors.get(method, None)
+        
+        axes[1].plot(recall, precision, label=f"{method_label} (AUPR={aupr_score:.2f}%)", 
+                   lw=2, color=color)
+    
+    # Set PR plot properties
+    axes[1].set_xlim([0.0, 1.0])
+    axes[1].set_ylim([0.0, 1.05])
+    axes[1].set_xlabel('Recall', fontsize=11, fontweight='bold')
+    axes[1].set_ylabel('Precision', fontsize=11, fontweight='bold')
+    axes[1].set_title('Precision-Recall Curve', fontsize=12, fontweight='bold')
+    axes[1].legend(loc='upper right', frameon=True, framealpha=0.9, fontsize=8)
+    
+    # Add minor grid for PR
+    axes[1].xaxis.set_minor_locator(MultipleLocator(0.05))
+    axes[1].yaxis.set_minor_locator(MultipleLocator(0.05))
+    
+    plt.tight_layout(pad=2.0)
+    
+    return fig
+def display_prediction_results(prediction_results, threshold=0.5):
+    """Display prediction results with the applied threshold"""
+    # Display results
+    st.markdown('<h2 class="sub-header">Prediction Results</h2>', unsafe_allow_html=True)
+    
+    # Get results DataFrame
+    results_df = prediction_results["results_df"]
+    
+    # Apply threshold - create a new prediction column based on threshold
+    results_df["Thresholded_Prediction"] = (results_df["Confidence"] >= threshold).astype(int)
+    
+    # Create results display with threshold information
+    display_df = results_df.copy()
+    display_df["Status"] = display_df["Thresholded_Prediction"].apply(
+        lambda x: "Virulence Factor ✓" if x == 1 else "Non-Virulence Factor ✗"
+    )
+    
+    # Predictions after threshold application
+    pos_count = (results_df["Thresholded_Prediction"] == 1).sum()
+    neg_count = (results_df["Thresholded_Prediction"] == 0).sum()
+    total = len(results_df)
+    
+    # Display summary statistics with different colors
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown('<div class="metric-card" style="background-color: #F0F7FF; border-color: #BAD7FF;">', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value" style="color: #1E40AF;">{total}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-label">Total Sequences</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        # Red color for VFs (changed from green to red)
+        st.markdown('<div class="metric-card" style="background-color: #FEF2F2; border-color: #FCA5A5; border-width: 2px;">', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value" style="color: #DC2626; font-size: 1.9rem; font-weight: 800;">{pos_count} <small>({pos_count/total:.1%})</small></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-label" style="font-weight: 600; font-size: 1rem;">Predicted Virulence Factors</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        # Green color for non-VFs (changed from red to green)
+        st.markdown('<div class="metric-card" style="background-color: #ECFDF5; border-color: #6EE7B7; border-width: 2px;">', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-value" style="color: #047857; font-size: 1.7rem;">{neg_count} <small>({neg_count/total:.1%})</small></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-label">Predicted Non-Virulence Factors</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Display threshold information
+    st.info(f"Current decision threshold: {threshold:.2f}. Proteins with confidence scores above this threshold are predicted as virulence factors.")
+    
+    # Create two-column layout for table and distribution chart
+    table_col, chart_col = st.columns([3, 2])
+    
+    with table_col:
+        st.markdown('<h3 class="sub-header">Prediction Table</h3>', unsafe_allow_html=True)
+        # Highlight rows - use styled DataFrame
+        st.dataframe(
+            display_df.style.apply(
+                lambda row: ['background-color: rgba(255,160,122,0.2)' if row['Thresholded_Prediction'] == 1 
+                            else 'background-color: rgba(176,224,230,0.2)' for _ in row],
+                axis=1
+            ),
+            height=500
+        )
+        
+        # Download button
+        csv = results_df.to_csv(index=False)
+        st.download_button(
+            label="Download Predictions (CSV)",
+            data=csv,
+            file_name="vf_predictions.csv",
+            mime="text/csv",
+        )
+    
+    with chart_col:
+        st.markdown('<h3 class="sub-header">Confidence Distribution</h3>', unsafe_allow_html=True)
+        
+        # Create chart
+        fig, ax = plt.subplots(figsize=(5, 4))
+        sns.histplot(
+            data=results_df, x="Confidence", hue="Thresholded_Prediction", 
+            bins=30, alpha=0.7, palette=["lightblue", "salmon"], 
+            element="step", kde=True, ax=ax
+        )
+        # Add threshold line
+        ax.axvline(x=threshold, color='red', linestyle='--')
+        ax.text(
+            threshold+0.02, ax.get_ylim()[1]*0.9, 
+            f'Threshold: {threshold:.2f}', 
+            color='red', fontsize=10
+        )
+        
+        ax.set_xlabel("Prediction Confidence", fontsize=12)
+        ax.set_ylabel("Count", fontsize=12)
+        ax.set_title("Distribution of Prediction Confidence", fontsize=14)
+        ax.legend(labels=["Non-Virulence", "Virulence"])
+        
+        # Display chart
+        st.pyplot(fig)
+        
+        # Confidence Guide
+        st.markdown("#### Confidence Guide")
+        st.markdown("""
+        - **High** (>0.9): Very likely VF
+        - **Medium** (0.7-0.9): Likely VF
+        - **Low** (0.5-0.7): Uncertain prediction
+        - **Very low** (<0.5): Likely not VF
+        """)
+    
+    # High confidence candidates
+    high_confidence_vf = results_df[(results_df["Thresholded_Prediction"] == 1) & (results_df["Confidence"] > 0.9)]
+    high_confidence_vf_count = len(high_confidence_vf)
+    
+    if high_confidence_vf_count > 0:
+        st.markdown('<h3 class="sub-header">High-Confidence Candidates</h3>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="highlight">
+        ✓ {high_confidence_vf_count} sequences were predicted as virulence factors with high confidence (>90%).
+        These are strong candidates for experimental validation.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.dataframe(high_confidence_vf)
+    
+    # Key insights
+    st.markdown('<h3 class="sub-header">Key Insights</h3>', unsafe_allow_html=True)
+    
+    # Ensemble method used
+    st.markdown(f"""
+    - **Majority Vote** ensemble method was used for final predictions.
+    - This method combines predictions from multiple individual models by selecting the most common prediction.
+    """)
+    
+    # Insight about prediction distribution
+    if pos_count/total > 0.3:
+        st.markdown("- A relatively high proportion of sequences were predicted as virulence factors, which might indicate a dataset enriched for virulence-related proteins.")
+    elif pos_count/total < 0.1:
+        st.markdown("- A small proportion of sequences were predicted as virulence factors, suggesting high prediction specificity or a dataset with few virulence-related proteins.")
+    
+    # Recommendation for further analysis
+    st.markdown("""
+    - **Recommended next steps:**
+      - Experimentally validate high-confidence predictions
+      - Perform functional annotation of predicted virulence factors
+      - Compare results with existing databases like VFDB
+    """)
+    
+    st.markdown('<p class="caption">The accuracy of predictions depends on the quality of input embeddings and may vary across different protein families. Always validate important findings experimentally.</p>', unsafe_allow_html=True)
+        
+    
+    
+    
+def run_prediction(esm_file, prot5_file, config, threshold=0.5, batch_size=64):
+    """Run prediction on the uploaded files"""
+    
+    device = get_device()
+    
+    # Use config batch size or the one from parameters
+    config["batch_size"] = batch_size
+    
+    # Save uploaded files to temporary paths
+    esm_path = load_h5_data(esm_file) if esm_file else None
+    prot5_path = load_h5_data(prot5_file) if prot5_file else None
+    
+    if not esm_path:
+        st.error("ESM2 embedding file is required")
+        return None
     
     try:
-        if "dual" in model_type.lower():
-            model = DualPathwayFusion(
+        # Load the dataset
+        test_dataset = DualEmbeddingDataset(
+            esm_h5_path=esm_path,
+            prot5_h5_path=prot5_path,
+            split='all'
+        )
+        
+        collate_function = dual_features_collate_fn
+        
+        # Get feature dimensions
+        sample = test_dataset[0]
+        esm_features, prot5_features = sample[0]
+        esm_dim = esm_features.shape[-1]
+        prot5_dim = prot5_features.shape[-1]
+        
+        # Create data loader
+        test_loader = DataLoader(
+            test_dataset, 
+            batch_size=config.get("batch_size", 64), 
+            shuffle=False,
+            collate_fn=collate_function
+        )
+        
+        # Initialize prediction arrays
+        all_labels = []
+        all_model_preds = []
+        all_model_scores = []
+        model_results = []
+        
+        # Get sequence IDs
+        with h5py.File(esm_path, 'r') as f:
+            sequence_ids = list(f.keys())
+        
+        # Process each model
+        for model_config in config["models"]:
+            model_type = model_config["type"]
+            model_path = model_config["path"]
+            feature_type = model_config.get("feature_type", "esm2")
+            model_name = model_config.get("name", model_type)
+            
+            # Skip if model file doesn't exist
+            if not os.path.exists(model_path):
+                st.warning(f"Model file not found: {model_path}. Skipping this model.")
+                continue
+            
+            # Load the model
+            is_fusion = "dual" in model_type.lower() or "fusion" in model_type.lower()
+            
+            model = load_model(
+                model_path=model_path,
+                model_type=model_type,
+                config=config,
                 esm_dim=esm_dim,
                 prot5_dim=prot5_dim,
-                hidden_dim=128,
-                num_layers=4,
-                num_classes=2,
-                rank=8,
-                steps=1,
-                dropout=config["dropout"]
+                input_dim=None,
+                device=device,
+                feature_type=feature_type
             )
-        else:
-            if feature_type == "esm2":
-                model = create_model(
-                    classifier_type='delta',
-                    input_dim=1280,
-                    hidden_dim=512,
-                    num_layers=4,
-                    dropout=0.5357584107527866,
-                    rank=4,
-                    steps=2,
+            
+            # Prepare loader for specific model type
+            current_loader = test_loader
+            if feature_type == "prot5" and not is_fusion and prot5_path:
+                test_dataset_prot5 = H5Dataset(
+                    h5_path=esm_path,
+                    feature_type='prot5',
+                    prot5_path=prot5_path,
                 )
-            elif feature_type == "prot5":
-                model = create_model(
-                    classifier_type='delta',
-                    input_dim=1024,
-                    hidden_dim=1024,
-                    num_layers=6,
-                    dropout=0.13123101867893097,
-                    rank=2,
-                    steps=4,
+                current_loader = DataLoader(
+                    test_dataset_prot5, 
+                    batch_size=config.get("batch_size", 64), 
+                    shuffle=False,
+                    collate_fn=collate_fn
                 )
+            # Run prediction
+            labels, preds, scores = predict_with_model(
+                model, current_loader, device, is_fusion, feature_type=feature_type
+            )
+            if len(all_labels) == 0:
+                all_labels = labels
+            all_model_preds.append(preds)
+            all_model_scores.append(scores)
         
-        model.to(device)
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.eval()
-        return model
-    
-    except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        return None
-
-def load_features_from_h5(h5_file, ids=None):
-    """Load protein features from H5 file"""
-    features = {}
-    seq_ids = []
-    
-    with h5py.File(h5_file, 'r') as f:
-        if 'ids' in f:
-            seq_ids = [id.decode('utf-8') if isinstance(id, bytes) else id for id in f['ids'][:]]
-        else:
-            # If no IDs are specified in the file, use indices
-            seq_ids = [f"seq_{i}" for i in range(len(f['mean']))]
+        if not all_model_preds:
+            st.error("No valid models could be loaded for prediction.")
+            return None
         
-        embeddings = f['mean'][:]
+        # Get model weights
+        model_weights = np.array([model.get("weight", 1.0) for model in config["models"]])
+        model_weights = model_weights / model_weights.sum()  # Normalize weights
         
-        # If specific IDs are requested, filter them
-        if ids is not None:
-            id_indices = {id: i for i, id in enumerate(seq_ids)}
-            for id in ids:
-                if id in id_indices:
-                    features[id] = embeddings[id_indices[id]]
-        else:
-            for i, id in enumerate(seq_ids):
-                features[id] = embeddings[i]
-    
-    return features, seq_ids
-
-def predict_from_features(model, features, device, is_fusion=False, feature_type="esm2"):
-    """Generate predictions from extracted features"""
-    model.eval()
-    
-    with torch.no_grad():
-        if is_fusion:
-            esm_features, prot5_features = features
-            esm_features = esm_features.to(device)
-            prot5_features = prot5_features.to(device)
-            outputs = model(esm_features, prot5_features)
-        else:
-            if feature_type == "esm2":
-                features_tensor = torch.tensor(features[0], dtype=torch.float32).to(device)
-            else:  # prot5
-                features_tensor = torch.tensor(features[1], dtype=torch.float32).to(device)
-            outputs = model(features_tensor)
-        
-        probs = torch.softmax(outputs, dim=1)
-        preds = torch.argmax(outputs, dim=1)
-        
-    return preds.cpu().numpy(), probs.cpu().numpy()
-
-def ensemble_predictions(all_scores, methods, weights=None):
-    """Generate ensemble predictions using different methods"""
-    num_models = len(all_scores)
-    ensemble_results = {}
-    
-    # If weights not provided, use equal weighting
-    if weights is None:
-        weights = np.ones(num_models) / num_models
-        
-    # Generate predictions for each ensemble method
-    for method in methods:
-        if method == "simple_avg":
-            ensemble_scores = np.mean(all_scores, axis=0)
-        elif method == "weighted_avg":
-            ensemble_scores = np.zeros_like(all_scores[0])
-            for i in range(num_models):
-                ensemble_scores += all_scores[i] * weights[i]
-        elif method == "majority_vote":
-            # Get individual predictions first
-            model_preds = [np.argmax(scores, axis=1) for scores in all_scores]
-            ensemble_preds = []
+        # Always use majority_vote as the ensemble method
+        ensemble_method = "majority_vote"
             
-            for i in range(len(all_scores[0])):
-                votes = [model_preds[j][i] for j in range(num_models)]
-                count_0 = votes.count(0)
-                count_1 = votes.count(1)
-                if count_1 > count_0:
-                    ensemble_preds.append(1)
-                else:
-                    ensemble_preds.append(0)
-                    
-            # Calculate confidence as the proportion of votes
-            confidence = np.array([votes.count(pred)/len(votes) for pred, votes in 
-                                   zip(ensemble_preds, [[model_preds[j][i] for j in range(num_models)] 
-                                                        for i in range(len(all_scores[0]))])])
-            
-            ensemble_results[method] = {
-                'predictions': np.array(ensemble_preds),
-                'confidence': confidence
-            }
-            continue
-            
-        # For averaging methods
-        ensemble_preds = np.argmax(ensemble_scores, axis=1)
-        ensemble_results[method] = {
-            'predictions': ensemble_preds,
-            'confidence': ensemble_scores[:, 1]  # Class 1 probability
-        }
-            
-    return ensemble_results
-
-def generate_visualization(results, sequence_ids):
-    """Generate visualization of prediction results"""
-    # Prepare data for visualization
-    viz_data = []
-    
-    for seq_id in sequence_ids:
-        for model, (pred, conf) in results[seq_id]['models'].items():
-            viz_data.append({
-                'Sequence ID': seq_id,
-                'Model': model,
-                'Prediction': 'Virulence Factor' if pred == 1 else 'Non-Virulence',
-                'Confidence': conf,
-                'Type': 'Individual Model'
-            })
-        
-        # Add ensemble results
-        for method, (pred, conf) in results[seq_id]['ensemble'].items():
-            viz_data.append({
-                'Sequence ID': seq_id,
-                'Model': f"Ensemble ({method})",
-                'Prediction': 'Virulence Factor' if pred == 1 else 'Non-Virulence',
-                'Confidence': conf,
-                'Type': 'Ensemble Method'
-            })
-    
-    df = pd.DataFrame(viz_data)
-    
-    # Create bar chart
-    fig = px.bar(
-        df, 
-        x='Model', 
-        y='Confidence', 
-        color='Prediction',
-        barmode='group',
-        facet_col='Sequence ID' if len(sequence_ids) > 1 else None,
-        color_discrete_map={
-            'Virulence Factor': '#E74C3C', 
-            'Non-Virulence': '#2ECC71'
-        },
-        title='Prediction Confidence by Model',
-        labels={'Confidence': 'Confidence Score (0-1)'},
-        height=500
-    )
-    
-    # Update layout
-    fig.update_layout(
-        legend_title_text='Prediction',
-        xaxis_title="",
-        font=dict(family="Arial, sans-serif", size=12)
-    )
-    
-    # Create heatmap for multiple sequences
-    if len(sequence_ids) > 1:
-        pivot_df = df.pivot_table(
-            values='Confidence', 
-            index='Sequence ID', 
-            columns='Model',
-            aggfunc='mean'
+        # Run ensemble prediction
+        ensemble_preds, ensemble_scores = ensemble_predictions(
+            all_labels, all_model_scores, all_model_preds,
+            ensemble_method=ensemble_method,
+            weights=model_weights
         )
         
-        fig2 = px.imshow(
-            pivot_df,
-            color_continuous_scale='RdYlGn',
-            title='Confidence Heatmap',
-            labels=dict(x="Model", y="Sequence ID", color="Confidence"),
-            height=400
-        )
+        # Calculate ensemble metrics if true labels are provided
+        ensemble_metrics = None
         
-        return fig, fig2
-    
-    return fig, None
-
-def create_downloadable_csv(results):
-    """Create downloadable CSV from results"""
-    records = []
-    
-    for seq_id, data in results.items():
-        row = {'Sequence ID': seq_id}
+        # Prepare results dataframe
+        results_df = pd.DataFrame({
+            "Sequence_ID": sequence_ids,
+            "Prediction": ensemble_preds,
+            "Confidence": ensemble_scores[:, 1]
+        })
         
         # Add individual model predictions
-        for model, (pred, conf) in data['models'].items():
-            row[f"{model} Prediction"] = 'Virulence Factor' if pred == 1 else 'Non-Virulence'
-            row[f"{model} Confidence"] = conf
+        for i, model_config in enumerate(config["models"]):
+            if i < len(all_model_preds):  # Check if we have predictions for this model
+                model_name = model_config.get("name", model_config["type"])
+                results_df[f"{model_name}_Prediction"] = all_model_preds[i]
+                results_df[f"{model_name}_Confidence"] = all_model_scores[i][:, 1]
         
-        # Add ensemble predictions
-        for method, (pred, conf) in data['ensemble'].items():
-            row[f"Ensemble({method}) Prediction"] = 'Virulence Factor' if pred == 1 else 'Non-Virulence'
-            row[f"Ensemble({method}) Confidence"] = conf
-            
-        records.append(row)
-    
-    return pd.DataFrame(records)
-
-def predict_from_uploaded_features(esm_features, prot5_features, models_info, device):
-    """Predict using pre-computed features"""
-    results = {}
-    
-    # Get common sequence IDs
-    common_ids = set(esm_features.keys()) & set(prot5_features.keys())
-    seq_ids = list(common_ids)
-    
-    if not seq_ids:
-        st.error("No matching sequence IDs found in the uploaded feature files")
-        return {}
-    
-    # Setup progress tracking
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    total_steps = len(seq_ids) * (len(models_info) + 1)  # +1 for ensemble
-    current_step = 0
-    
-    # Process each sequence
-    for idx, seq_id in enumerate(seq_ids):
-        status_text.text(f"Processing sequence {idx+1}/{len(seq_ids)}: {seq_id}")
-        
-        # Get features for this sequence
-        esm_feature = esm_features[seq_id]
-        prot5_feature = prot5_features[seq_id]
-        
-        # Initialize results for this sequence
-        results[seq_id] = {
-            'models': {},
-            'ensemble': {}
+        # Store results
+        results = {
+            "results_df": results_df,
+            "ensemble_metrics": ensemble_metrics,
+            "model_results": model_results,
+            "ensemble_method": ensemble_method
         }
         
-        # Run each model
-        all_scores = []
-        model_weights = []
+        # Clean up temporary files
+        if esm_path:
+            os.unlink(esm_path)
+        if prot5_path:
+            os.unlink(prot5_path)
         
-        for model_info in models_info:
-            current_step += 1
-            progress_bar.progress(current_step / total_steps)
-            status_text.text(f"Running model: {model_info['name']} on {seq_id}")
-            
-            model = model_info['model']
-            is_fusion = "dual" in model_info['type'].lower()
-            feature_type = model_info['feature_type']
-            
-            # Create appropriate features input
-            if is_fusion:
-                features = [
-                    torch.tensor(esm_feature, dtype=torch.float32).unsqueeze(0),
-                    torch.tensor(prot5_feature, dtype=torch.float32).unsqueeze(0)
-                ]
-            else:
-                features = [
-                    torch.tensor(esm_feature, dtype=torch.float32).unsqueeze(0),
-                    torch.tensor(prot5_feature, dtype=torch.float32).unsqueeze(0)
-                ]
-            
-            # Get predictions
-            preds, probs = predict_from_features(
-                model, features, device, is_fusion, feature_type
-            )
-            
-            # Store results
-            results[seq_id]['models'][model_info['name']] = (preds[0], probs[0][1])
-            all_scores.append(probs)
-            model_weights.append(model_info.get('weight', 1.0))
+        return results
         
-        # Normalize weights
-        model_weights = np.array(model_weights)
-        model_weights = model_weights / model_weights.sum()
-        
-        # Ensemble predictions
-        current_step += 1
-        progress_bar.progress(current_step / total_steps)
-        status_text.text(f"Generating ensemble predictions for {seq_id}")
-        
-        ensemble_methods = ['simple_avg', 'weighted_avg', 'majority_vote']
-        ensemble_results = ensemble_predictions(all_scores, ensemble_methods, model_weights)
-        
-        # Store ensemble results
-        for method, result in ensemble_results.items():
-            results[seq_id]['ensemble'][method] = (
-                result['predictions'][0],
-                result['confidence'][0]
-            )
-    
-    progress_bar.progress(100)
-    status_text.text("Prediction complete!")
-    
-    # Clean up UI
-    status_text.empty()
-    progress_bar.empty()
-    
-    return results
+    except Exception as e:
+        st.error(f"Error during prediction: {str(e)}")
+        # Clean up temporary files
+        if esm_path:
+            os.unlink(esm_path)
+        if prot5_path:
+            os.unlink(prot5_path)
+        return None
 
-# Main application
-def main():
-    add_custom_css()
-    set_all_seeds(42)
-    
-    # Initialize session state
-    if 'prediction_results' not in st.session_state:
-        st.session_state.prediction_results = None
-    if 'feature_ids' not in st.session_state:
-        st.session_state.feature_ids = None
-    
-    # Page header
-    st.markdown("<h1 class='main-header'>VF-FUSE: Virulence Factor Prediction</h1>", unsafe_allow_html=True)
-    st.markdown("""
-    <div style='margin-bottom: 2rem;'>
-    A deep learning system that uses protein language models and ensemble techniques to predict 
-    bacterial virulence factors with high accuracy.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Sidebar
-    with st.sidebar:
-        st.markdown("## Configuration")
-        
-        # Model selection
-        st.markdown("### Select Models")
-        use_esm2 = st.checkbox("ESM2 Model", value=True)
-        use_prot5 = st.checkbox("ProtT5 Model", value=True)
-        use_fusion = st.checkbox("Fusion Model", value=True)
-        
-        if not (use_esm2 or use_prot5 or use_fusion):
-            st.warning("Please select at least one model")
-        
-        # Ensemble method selection
-        st.markdown("### Ensemble Methods")
-        use_simple_avg = st.checkbox("Simple Average", value=True)
-        use_weighted_avg = st.checkbox("Weighted Average", value=True)
-        use_majority = st.checkbox("Majority Vote", value=True)
-        
-        if not (use_simple_avg or use_weighted_avg or use_majority):
-            st.warning("Please select at least one ensemble method")
+# Main app layout
+st.markdown('<h1 class="main-header">VF-pred: Virulence Factor Prediction Tool</h1>', unsafe_allow_html=True)
+st.markdown("""
+This application predicts virulence factors using ensemble deep learning models based on protein language model embeddings.
+Upload your embedding files, adjust parameters in the sidebar, and get predictions.
+""")
+
+# Sidebar for parameter configuration
+st.sidebar.title("Parameters")
+
+# Decision threshold slider
+threshold = st.sidebar.slider(
+    "Prediction Threshold", 
+    min_value=0.0, 
+    max_value=1.0, 
+    value=0.5, 
+    step=0.01,
+    help="Proteins with probability above this value will be predicted as virulence factors"
+)
+st.session_state['threshold'] = threshold
+
+# Batch size slider
+batch_size = st.sidebar.slider(
+    "Batch Size", 
+    min_value=8, 
+    max_value=128, 
+    value=64, 
+    step=8,
+    help="Larger batch size may speed up prediction but requires more memory"
+)
+st.session_state['batch_size'] = batch_size
+
+# Add method explanation
+st.sidebar.markdown("## Ensemble Method")
+st.sidebar.markdown("""
+This tool uses the **Majority Vote** ensemble method that:
+- Takes predictions from multiple models
+- Selects the most frequent prediction class for each protein
+- Provides robust results by combining different model perspectives
+""")
+
+# About section
+st.sidebar.markdown("## About")
+st.sidebar.info("""
+**VF-pred Tool**  
+Version 1.0.0  
+© 2025 VF-pred Team  
+
+This tool implements ensemble deep learning models for virulence factor prediction using protein language model embeddings.
+""")
+
+# Create two-column layout for file upload
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### ESM2 Embeddings")
+    esm_file = st.file_uploader("Upload ESM2 embeddings (H5 format)", type=["h5"])
+    st.caption("Required: H5 file containing ESM2 embeddings for protein sequences")
+
+with col2:
+    st.markdown("### ProtT5 Embeddings")
+    prot5_file = st.file_uploader("Upload ProtT5 embeddings (H5 format)", type=["h5"])
+    st.caption("Optional: H5 file containing ProtT5 embeddings for protein sequences")
+
+# Run prediction button below file upload
+st.markdown("---")
+if st.button("Run Prediction", type="primary", use_container_width=True):
+    if not esm_file:
+        st.error("ESM2 embedding file is required.")
+    else:
+        with st.spinner("Running prediction..."):
+            # Get parameters from sidebar
+            threshold = st.session_state.get('threshold', 0.5)
+            batch_size = st.session_state.get('batch_size', 8)
             
-        # Advanced options
-        st.markdown("### Advanced Options")
-        confidence_threshold = st.slider("Confidence Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
-        
-        # About section
-        st.markdown("---")
-        st.markdown("### About")
-        st.markdown("""
-        VF-FUSE combines protein language models (ESM2 and ProtT5) 
-        with deep learning architectures to identify bacterial virulence factors.
-        
-        [GitHub Repository](https://github.com/yourusername/VF-FUSE)
-        """)
-    
-    # Main content area with tabs
-    tab1, tab2, tab3 = st.tabs(["Prediction", "Results", "Documentation"])
-    
-    with tab1:
-        st.markdown("<h2 class='sub-header'>Protein Embeddings Input</h2>", unsafe_allow_html=True)
-        
-        # Upload feature files
-        st.markdown("### Upload Pre-computed Protein Embeddings")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**ESM2 Embeddings**")
-            esm_file = st.file_uploader("Upload ESM2 features (H5 format)", type=["h5"])
-        
-        with col2:
-            st.markdown("**ProtT5 Embeddings**")
-            prot5_file = st.file_uploader("Upload ProtT5 features (H5 format)", type=["h5"])
-        
-        # Load and display feature information
-        esm_features = {}
-        prot5_features = {}
-        esm_ids = []
-        prot5_ids = []
-        
-        if esm_file and prot5_file:
-            # Load ESM2 features
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_esm:
-                tmp_esm.write(esm_file.getvalue())
-                tmp_esm_path = tmp_esm.name
-            
-            # Load ProtT5 features
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_prot5:
-                tmp_prot5.write(prot5_file.getvalue())
-                tmp_prot5_path = tmp_prot5.name
-                
+            # Load config
             try:
-                # Process uploaded feature files
-                esm_features, esm_ids = load_features_from_h5(tmp_esm_path)
-                prot5_features, prot5_ids = load_features_from_h5(tmp_prot5_path)
-                
-                # Find common sequence IDs
-                common_ids = set(esm_ids) & set(prot5_ids)
-                
-                # Display information
-                st.markdown(f"**ESM2 Features:** {len(esm_ids)} sequences loaded")
-                st.markdown(f"**ProtT5 Features:** {len(prot5_ids)} sequences loaded")
-                st.markdown(f"**Common Sequences:** {len(common_ids)} sequences found in both files")
-                
-                if len(common_ids) == 0:
-                    st.error("No common sequence IDs found between the two feature files")
-                
-                # Store feature IDs in session state
-                st.session_state.feature_ids = list(common_ids)
-                
-            except Exception as e:
-                st.error(f"Error processing feature files: {str(e)}")
+                with open('VF-FUSE/config.json', 'r') as f:
+                    config = json.load(f)
+            except:
+                try:
+                    with open('config.json', 'r') as f:
+                        config = json.load(f)
+                except:
+                    st.error("Unable to load configuration file. Please check the file path.")
+                    st.stop()
             
-            finally:
-                os.unlink(tmp_esm_path)
-                os.unlink(tmp_prot5_path)
-        
-        # Predict button
-        predict_col1, predict_col2 = st.columns([1, 3])
-        with predict_col1:
-            predict_button = st.button(
-                "Predict Virulence Factors", 
-                type="primary", 
-                disabled=(not esm_file or not prot5_file or 
-                         not (use_esm2 or use_prot5 or use_fusion) or
-                         len(common_ids) == 0)
+            # Run prediction with majority_vote method only
+            results = run_prediction(
+                esm_file, prot5_file, config, threshold, batch_size
             )
-        
-        # Run prediction when button is clicked
-        if predict_button:
-            # Load models
-            device = get_device()
-            st.info(f"Using device: {device}")
             
-            config = {
-                "dropout": 0.1,
-                "batch_size": 32
-            }
-            
-            # Load selected models
-            models_info = []
-            
-            if use_esm2:
-                esm2_model = load_model(
-                    model_path="best/esm2_best.pth",
-                    model_type="simple_transformer", 
-                    config=config,
-                    esm_dim=1280,
-                    prot5_dim=1024,
-                    device=device,
-                    feature_type="esm2"
-                )
-                if esm2_model:
-                    models_info.append({
-                        'model': esm2_model,
-                        'name': 'ESM2',
-                        'type': 'simple_transformer',
-                        'feature_type': 'esm2',
-                        'weight': 1.0
-                    })
-            
-            if use_prot5:
-                prot5_model = load_model(
-                    model_path="best/prot5_best_model.pth",
-                    model_type="simple_transformer", 
-                    config=config,
-                    esm_dim=1280,
-                    prot5_dim=1024,
-                    device=device,
-                    feature_type="prot5"
-                )
-                if prot5_model:
-                    models_info.append({
-                        'model': prot5_model,
-                        'name': 'ProtT5',
-                        'type': 'simple_transformer',
-                        'feature_type': 'prot5',
-                        'weight': 1.0
-                    })
-            
-            if use_fusion:
-                fusion_model = load_model(
-                    model_path="best/fusion_fine_tuned.pth",
-                    model_type="dual_transformer", 
-                    config=config,
-                    esm_dim=1280,
-                    prot5_dim=1024,
-                    device=device,
-                    feature_type="dual"
-                )
-                if fusion_model:
-                    models_info.append({
-                        'model': fusion_model,
-                        'name': 'Fusion',
-                        'type': 'dual_transformer',
-                        'feature_type': 'dual',
-                        'weight': 1.2
-                    })
-            
-            if not models_info:
-                st.error("No models could be loaded. Please check model paths and configurations.")
-            else:
-                # Run prediction
-                with st.spinner("Running prediction... This may take a few minutes."):
-                    results = predict_from_uploaded_features(
-                        esm_features, prot5_features, models_info, device
-                    )
-                
-                # Store results in session state
-                st.session_state.prediction_results = results
-                
-                # Switch to results tab
-                if results:
-                    st.success("Prediction complete! View results in the Results tab.")
-                else:
-                    st.error("Prediction failed. Please check the input data.")
-
-    with tab2:
-        st.markdown("<h2 class='sub-header'>Prediction Results</h2>", unsafe_allow_html=True)
-        
-        if st.session_state.prediction_results:
-            results = st.session_state.prediction_results
-            
-            # Create results dataframe
-            df = create_downloadable_csv(results)
-            
-            # Display summary
-            st.markdown("### Summary")
-            summary_cols = st.columns(4)
-            with summary_cols[0]:
-                st.metric("Total Sequences", len(results))
-            
-            # Count predicted virulence factors using the weighted_avg ensemble
-            vf_count = sum(1 for seq_data in results.values() 
-                          if seq_data['ensemble'].get('weighted_avg', (0, 0))[0] == 1)
-            
-            with summary_cols[1]:
-                st.metric("Predicted VFs", vf_count)
-                
-            with summary_cols[2]:
-                st.metric("Predicted Non-VFs", len(results) - vf_count)
-            
-            # Most confident prediction
             if results:
-                max_conf = max(results.values(), 
-                              key=lambda x: x['ensemble'].get('weighted_avg', (0, 0))[1])
-                max_conf_id = [k for k, v in results.items() 
-                             if v['ensemble'].get('weighted_avg', (0, 0))[1] == 
-                             max_conf['ensemble'].get('weighted_avg', (0, 0))[1]][0]
-                
-                with summary_cols[3]:
-                    st.metric("Highest Confidence", 
-                            f"{max_conf['ensemble'].get('weighted_avg', (0, 0))[1]:.2f}",
-                            f"({max_conf_id})")
-            
-            # Generate visualizations
-            st.markdown("### Visualization")
-            fig, heatmap = generate_visualization(results, list(results.keys()))
-            
-            # Display bar chart
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display heatmap for multiple sequences
-            if heatmap is not None:
-                st.plotly_chart(heatmap, use_container_width=True)
-            
-            # Detailed results table
-            st.markdown("### Detailed Results")
-            st.dataframe(df, use_container_width=True)
-            
-            # Filter by confidence threshold
-            threshold = st.sidebar.slider(
-                "Filter by confidence threshold", 
-                min_value=0.0, 
-                max_value=1.0, 
-                value=0.5, 
-                step=0.05
-            )
-            
-            # Apply filter
-            filtered_df = df[df.filter(like='Confidence').max(axis=1) >= threshold]
-            if len(filtered_df) < len(df):
-                st.markdown(f"**Filtered Results (Confidence ≥ {threshold}):**")
-                st.dataframe(filtered_df, use_container_width=True)
-            
-            # Download results
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Download Results as CSV",
-                data=csv,
-                file_name="vf_prediction_results.csv",
-                mime="text/csv",
-            )
-        else:
-            st.info("No prediction results yet. Please go to the Prediction tab to run a prediction.")
+                # Display results directly without tabs
+                display_prediction_results(results, threshold)
 
-    with tab3:
-        st.markdown("<h2 class='sub-header'>Documentation</h2>", unsafe_allow_html=True)
-        
-        st.markdown("""
-        ## VF-FUSE: Deep Learning Virulence Factor Prediction
-        
-        ### Introduction
-        
-        VF-FUSE is an ensemble learning system that combines protein language models (ESM2 and ProtT5) 
-        with deep learning architectures for accurate prediction of bacterial virulence factors.
-        
-        ### Models
-        
-        1. **ESM2 Model**: Uses embeddings from the ESM2 protein language model
-        2. **ProtT5 Model**: Uses embeddings from the ProtT5 protein language model
-        3. **Fusion Model**: Combines both ESM2 and ProtT5 embeddings
-        
-        ### Ensemble Methods
-        
-        1. **Simple Average**: Averages predictions from all models
-        2. **Weighted Average**: Weighted combination of model predictions
-        3. **Majority Vote**: Uses the most common prediction across models
-        
-        ### Input Format
-        
-        The system requires pre-computed protein embeddings in H5 format:
-        
-        1. **ESM2 Embeddings**: H5 file containing mean embeddings from ESM2
-        2. **ProtT5 Embeddings**: H5 file containing mean embeddings from ProtT5
-        
-        Both files should contain sequence IDs in the `ids` dataset and feature vectors in the `mean` dataset.
-        
-        ### Interpretation
-        
-        - **Prediction**: "Virulence Factor" or "Non-Virulence"
-        - **Confidence**: Score from 0 to 1 indicating confidence in prediction
-        - Higher confidence scores (closer to 1) indicate stronger predictions
-        
-        ### References
-        
-        1. ESM2: [Paper link](https://www.science.org/doi/10.1126/science.ade2574)
-        2. ProtT5: [Paper link](https://www.biorxiv.org/content/10.1101/2020.07.12.199554v3)
-        """)
-        
-        # Feature extraction information
-        st.markdown("""
-        ### Feature Extraction
-        
-        To generate feature files for prediction, use the following tools:
-        
-        #### ESM2 Feature Extraction
-        ```bash
-        python get_esm2_embedding.py --input sequences.fasta --output esm2_features.h5 --model esm2_t33_650M_UR50D
-        ```
-        
-        #### ProtT5 Feature Extraction
-        ```bash
-        python get_prot5.py --input sequences.fasta --output prot5_features.h5
-        ```
-        """)
-
-    # Footer
-    st.markdown("""
-    <div class='footer'>
-        VF-FUSE: Protein Language Model-based Virulence Factor Prediction System © 2025
-    </div>
-    """, unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+# Default content when app first loads
+else:
+    st.info("""
+    ## Getting Started
+    
+    1. **Prepare your data files**:
+       - Generate ESM2 embeddings using ESM2 model (t33_650M_UR50D recommended)
+       - Generate ProtT5 embeddings using ProtT5 model (optional)
+       - Save both as H5 files with protein sequences as keys
+    
+    2. **Upload your files**:
+       - Use the file uploaders above to select your embedding files
+       - ESM2 file is required, ProtT5 file is optional
+    
+    3. **Adjust parameters**:
+       - Set the prediction threshold in the sidebar
+       - Configure batch size
+    
+    4. **Run prediction**:
+       - Click the "Run Prediction" button
+       - Review the results and analysis
+    
+    5. **Interpret results**:
+       - Proteins with confidence above the threshold are predicted as virulence factors
+       - Higher confidence scores (closer to 1.0) indicate stronger predictions
+       - Adjust the threshold to balance precision and recall
+    """)
+    
+    
