@@ -6,7 +6,7 @@ from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.air import session
-from plm_train import *
+from train import *
 
 warnings.filterwarnings("ignore")
 warnings.simplefilter("ignore", UserWarning)
@@ -23,16 +23,7 @@ with open(best_result_path, "r") as f:
     best_config = json.load(f)
     # 1
 best_model_path = "/root/runs/esm_prot5_fusion/fold_10/best_model.pth"
-hidden_dim = 128
-num_layers = 4
-dropout = 0.1366446537351037
-batch_size = 64
-num_epochs = 44
-patience = 4
-learning_rate = 0.0009925368624034026
-weight_decay = 0.00011990263215195225
-rank = 8
-step = 1
+
 # ==== 路径配置 ====
 test_esm_path = '/root/autodl-tmp/.autodl/embedding_data/test_esm2_t33_650M_UR50D_mean.h5'
 test_prot5_path = "/root/autodl-tmp/test_prot_features_modified.h5"
@@ -65,28 +56,17 @@ if is_fusion_model:
         shuffle=False,
         collate_fn=collate_function
     )
-    
-    # 创建融合模型
-    model = NoFinalFusionLayer(
+
+    model = ImprovedDualPathwayFusion(
         esm_dim=esm_dim,
         prot5_dim=prot5_dim,
-        hidden_dim=best_config["hidden_dim"],
-        num_layers=best_config["num_layers"],
+        hidden_dim=hidden_dim,
+        num_layers=num_layers,
         num_classes=2,
-        rank=best_config["rank"],
-        steps=best_config["steps"],
-        dropout=best_config["dropout"]
+        rank=rank,
+        steps=step,
+        dropout=dropout
     )
-    # model = DualPathwayFusion(
-    #     esm_dim=esm_dim,
-    #     prot5_dim=prot5_dim,
-    #     hidden_dim=hidden_dim,
-    #     num_layers=num_layers,
-    #     num_classes=2,
-    #     rank=rank,
-    #     steps=step,
-    #     dropout=dropout
-    # )
 else:
     # 使用原来的单特征加载方式
     test_dataset = H5Dataset(
@@ -167,11 +147,6 @@ with torch.no_grad():
 
 all_scores = np.array(all_scores)
 
-# # 如果是融合模型，保存注意力权重
-# if is_fusion_model and hasattr(model, "last_attention_weights"):
-#     print(f"平均注意力权重: ESM={model.last_attention_weights[0].item():.4f}, ProtT5={model.last_attention_weights[1].item():.4f}")
-
-
 from sklearn.metrics import confusion_matrix
 import numpy as np
 from sklearn.metrics import confusion_matrix, roc_auc_score, precision_recall_curve, auc
@@ -211,28 +186,3 @@ print(f"MCC            : {mcc:.2f}%")
 print(f"AUC            : {auc_score:.2f}%")
 print(f"AUPR           : {aupr_score:.2f}%")
 
-# 如果是融合模型，增加特征融合分析
-if is_fusion_model:
-    print("\n===== 特征融合分析 =====")
-    # 对比不同注意力权重下的性能
-    print("ESM特征权重高的样本性能:")
-    esm_focused_indices = np.where(model.last_attention_weights[:, 0].cpu().numpy() > 0.6)[0]
-    if len(esm_focused_indices) > 0:
-        esm_focused_metrics = calculate_metrics(
-            [all_labels[i] for i in esm_focused_indices],
-            [all_preds[i] for i in esm_focused_indices],
-            all_scores[esm_focused_indices] if len(esm_focused_indices) > 0 else None
-        )
-        print(f"  样本数: {len(esm_focused_indices)}")
-        print(f"  F1: {esm_focused_metrics[3]:.2f}%, MCC: {esm_focused_metrics[4]:.2f}%")
-
-    print("ProtT5特征权重高的样本性能:")
-    prot5_focused_indices = np.where(model.last_attention_weights[:, 1].cpu().numpy() > 0.6)[0]
-    if len(prot5_focused_indices) > 0:
-        prot5_focused_metrics = calculate_metrics(
-            [all_labels[i] for i in prot5_focused_indices],
-            [all_preds[i] for i in prot5_focused_indices],
-            all_scores[prot5_focused_indices] if len(prot5_focused_indices) > 0 else None
-        )
-        print(f"  样本数: {len(prot5_focused_indices)}")
-        print(f"  F1: {prot5_focused_metrics[3]:.2f}%, MCC: {prot5_focused_metrics[4]:.2f}%")

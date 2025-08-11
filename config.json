@@ -1,31 +1,54 @@
 {
-  "batch_size": 64,
-  "hidden_dim": 128,
-  "num_layers": 1,
-  "dropout": 0.4,
-  "rank": 32,
-  "steps": 4,
-  "test_esm_path": "VF-FUSE\test_data\test_esm2_t33_650M_UR50D_mean.h5",
-  "test_prot5_path": "VF-FUSE\test_data\test_prot_features_modified.h5",
+  "test_esm_path": "VF-FUSE\test_data\test_esm2.h5",
+  "test_prot5_path": "VF-FUSE\test_data\test_prot.h5",
   "models": [
-    {
-      "type": "DualPathwayFusion",
-      "feature_type": "all",
-      "path": "VF-FUSE/best/fusion_fine_tuned.pth",
-      "weight": 0.85
-    },
 
+    {
+      "type": "ImprovedDualPathwayFusion",
+      "feature_type": "all",
+      "path": "VF-FUSE/best/1_fusion_867.pth",
+      "weight": 0.9,
+      "hidden_dim": 1024,
+      "num_layers": 6,
+      "dropout": 0.29469650436868966,
+      "rank": 16,
+      "steps": 2
+    },
     {
       "type": "delta",
       "feature_type": "esm2",
       "path": "VF-FUSE/best/esm2_best.pth",
-      "weight": 0.73
+      "weight": 0.73,
+      "input_dim":1280,
+      "hidden_dim":512,
+      "num_layers":4,
+      "dropout":0.5357584107527866,
+      "rank":4,
+      "steps":2
     },
     {
       "type": "delta",
       "feature_type": "prot5",
       "path": "VF-FUSE/best/prot5_best_model.pth",
-      "weight": 0.08
+      "weight": 0.15,
+      "input_dim":1024,
+      "hidden_dim":1024,
+      "num_layers":6,
+      "dropout":0.13123101867893097,
+      "rank":2,
+      "steps":4   
+    },
+    {
+      "type": "delta",
+      "feature_type": "all",
+      "path": "VF-FUSE/best/esm+prot5_ba.pth",
+      "weight": 0.8,
+      "input_dim":2304,
+      "hidden_dim":1024,
+      "num_layers":2,
+      "dropout":0.22863191533551397,
+      "rank":4,
+      "steps":1
     }
   ],
   "save_results": true

@@ -3,7 +3,6 @@ biopython==1.85
 h5py==3.13.0
 joblib==1.4.2
 lightgbm==4.6.0
-mamba_ssm==2.2.4
 matplotlib==3.10.3
 numpy==2.2.5
 pandas==2.2.3

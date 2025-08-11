@@ -7,7 +7,7 @@ from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.optuna import OptunaSearch
 from ray.air import session
-from plm_train import *
+from train import *
 
 warnings.filterwarnings("ignore")
 warnings.simplefilter("ignore", UserWarning)
@@ -45,7 +45,7 @@ def train_tune(config, train_path, device, num_classes, prot5_path=None):
         prot5_path=prot5_path,
         
         # 交叉验证参数
-        n_folds=5,  # 使用5折交叉验证，加快调参速度
+        n_folds=10,  # 使用5折交叉验证，加快调参速度
     )
     
     # 报告平均F1分数
@@ -132,7 +132,7 @@ if __name__ == "__main__":
         search_algo = OptunaSearch(metric="f1", mode="max")
         
         # 设置试验数量
-        num_samples = 30 if model_name in ['delta', 'mamba', 'bimamba', 'deltaattfusion'] else 30
+        num_samples = 30
         
         print(f"将进行 {num_samples} 次参数搜索...")
         

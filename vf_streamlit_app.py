@@ -1,26 +1,27 @@
-import streamlit as st
-import torch
+import json
+import os
+import tempfile
+
+import h5py
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-import os
-import json
-import h5py
-import tempfile
-from sklearn.metrics import roc_curve, precision_recall_curve, auc
-from torch.utils.data import DataLoader
-import matplotlib as mpl
-from matplotlib.ticker import MultipleLocator, FormatStrFormatter
-
+import streamlit as st
+import torch
 # Import necessary functions from your existing code
 # Assuming these are in the same directory or properly importable
 from esmmodel import *
+from matplotlib.ticker import FormatStrFormatter, MultipleLocator
+from sklearn.metrics import auc, precision_recall_curve, roc_curve
+from torch.utils.data import DataLoader
+
 from model_type import *
 
 # Set page configuration
 st.set_page_config(
-    page_title="VF-pred: Virulence Factor Prediction",
+    page_title="VF-FUSE: Virulence Factor Prediction",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -412,6 +413,7 @@ def run_prediction(esm_file, prot5_file, config, threshold=0.5, batch_size=64):
         
         # Process each model
         for model_config in config["models"]:
+            
             model_type = model_config["type"]
             model_path = model_config["path"]
             feature_type = model_config.get("feature_type", "esm2")
@@ -428,7 +430,7 @@ def run_prediction(esm_file, prot5_file, config, threshold=0.5, batch_size=64):
             model = load_model(
                 model_path=model_path,
                 model_type=model_type,
-                config=config,
+                config=model_config,
                 esm_dim=esm_dim,
                 prot5_dim=prot5_dim,
                 input_dim=None,
@@ -471,11 +473,8 @@ def run_prediction(esm_file, prot5_file, config, threshold=0.5, batch_size=64):
         ensemble_method = "majority_vote"
             
         # Run ensemble prediction
-        ensemble_preds, ensemble_scores = ensemble_predictions(
-            all_labels, all_model_scores, all_model_preds,
-            ensemble_method=ensemble_method,
-            weights=model_weights
-        )
+
+        ensemble_preds, ensemble_scores=ensemble_predictions(all_model_scores, all_model_preds, ensemble_method=ensemble_method, weights=model_weights)
         
         # Calculate ensemble metrics if true labels are provided
         ensemble_metrics = None
@@ -520,7 +519,7 @@ def run_prediction(esm_file, prot5_file, config, threshold=0.5, batch_size=64):
         return None
 
 # Main app layout
-st.markdown('<h1 class="main-header">VF-pred: Virulence Factor Prediction Tool</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">VF-FUSE: Virulence Factor Prediction Tool</h1>', unsafe_allow_html=True)
 st.markdown("""
 This application predicts virulence factors using ensemble deep learning models based on protein language model embeddings.
 Upload your embedding files, adjust parameters in the sidebar, and get predictions.
@@ -563,9 +562,9 @@ This tool uses the **Majority Vote** ensemble method that:
 # About section
 st.sidebar.markdown("## About")
 st.sidebar.info("""
-**VF-pred Tool**  
+**VF-FUSE Tool**  
 Version 1.0.0  
-© 2025 VF-pred Team  
+© 2025 VF-FUSE Team  
 
 This tool implements ensemble deep learning models for virulence factor prediction using protein language model embeddings.
 """)
@@ -575,12 +574,25 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### ESM2 Embeddings")
-    esm_file = st.file_uploader("Upload ESM2 embeddings (H5 format)", type=["h5"])
+    esm_file = st.file_uploader(
+        "Upload ESM2 embeddings (H5 format)", 
+        type=["h5"], 
+        key="esm_file_uploader", 
+        accept_multiple_files=False
+    )
+    # Try to set a default path if running locally and no file is uploaded
+    if esm_file is None and os.path.exists("/root/VF-FUSE/test_data/test_esm2.h5"):
+        esm_file = "/root/VF-FUSE/test_data/test_esm2.h5"
+        st.info("Using default ESM2 embedding file: /root/VF-FUSE/esm2_embeddings.h5")
     st.caption("Required: H5 file containing ESM2 embeddings for protein sequences")
 
 with col2:
     st.markdown("### ProtT5 Embeddings")
     prot5_file = st.file_uploader("Upload ProtT5 embeddings (H5 format)", type=["h5"])
+        # Try to set a default path if running locally and no file is uploaded
+    if prot5_file is None and os.path.exists("/root/VF-FUSE/test_data/test_prot.h5"):
+        prot5_file = "/root/VF-FUSE/test_data/test_prot.h5"
+        st.info("Using default ESM2 embedding file: /root/VF-FUSE/esm2_embeddings.h5")
     st.caption("Optional: H5 file containing ProtT5 embeddings for protein sequences")
 
 # Run prediction button below file upload
