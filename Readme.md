@@ -5,7 +5,7 @@ This repository contains the code for the paper submission, featuring a fusion a
 
 ## Framework Overview
 
-![VF-FUSE Framework](images/framework.png)
+![VF-FUSE Framework](model_arch.png)
 
 *Figure: The overall architecture of VF-FUSE, integrating PLM embeddings and traditional features for protein function prediction.*
 
@@ -80,3 +80,4 @@ Suppose you have a new FASTA file (e.g., `new.fasta`). Follow these steps for pr
 ---
 
 This repository is for academic communication and paper reproduction only.
+
